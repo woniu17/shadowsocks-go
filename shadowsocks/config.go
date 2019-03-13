@@ -11,7 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	// "log"
+	"log"
 	"os"
 	"reflect"
 	"time"
@@ -91,6 +91,14 @@ func ParseConfig(path string) (config *Config, err error) {
 
 func SetDebug(d DebugLog) {
 	Debug = d
+}
+
+func SetDebugLogFile(d DebugLog, fileName string) {
+	file, err := os.OpenFile(fileName, os.O_CREATE | os.O_APPEND | os.O_RDWR, os.ModePerm|os.ModeTemporary)
+	if err != nil {
+		panic(err)
+	}
+	dbgLog = log.New(file, "[DEBUG] ", log.Ltime)
 }
 
 // UpdateConfig: Useful for command line to override options specified in config file

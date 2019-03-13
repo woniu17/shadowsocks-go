@@ -8,8 +8,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -19,7 +21,7 @@ import (
 	"syscall"
 	"time"
 
-	ss "github.com/shadowsocks/shadowsocks-go/shadowsocks"
+	ss "../../shadowsocks"
 )
 
 const (
@@ -38,10 +40,22 @@ const (
 	// lenHmacSha1 = 10
 )
 
+type IPDATA struct {
+	Ip string `json:"ip""`
+	City string `json:"city""`
+	IspID string `json:"isp_id"`
+}
+type IPRESP struct {
+	Code int `json:"code"`
+	Data IPDATA `json:"data"`
+}
+
 var debug ss.DebugLog
 var sanitizeIps bool
 var udp bool
 var managerAddr string
+var ipDataMap map[string]IPDATA
+var ipDataMapMutex sync.Mutex
 
 func getRequest(conn *ss.Conn) (host string, err error) {
 	ss.SetReadTimeout(conn)
@@ -163,9 +177,50 @@ func handleConnection(conn *ss.Conn, port string) {
 			remote.Close()
 		}
 	}()
-	if debug {
-		debug.Printf("piping %s<->%s", sanitizeAddr(conn.RemoteAddr()), host)
-	}
+
+	go func() {
+		if debug {
+			ipDataMapMutex.Lock()
+			defer ipDataMapMutex.Unlock()
+			if ipDataMap == nil {
+				ipDataMap = make(map[string]IPDATA)
+			}
+			remoteAddr := sanitizeAddr(conn.RemoteAddr())
+			remoteIp := strings.Split(remoteAddr, ":")[0]
+			if ipData, ok := ipDataMap[remoteIp]; ok {
+				debug.Printf("ip1 piping %s %s %s <-> %s", remoteAddr, ipData.City, ipData.IspID, host)
+			} else {
+				resp, err := http.Get("http://ip.taobao.com/service/getIpInfo.php?ip=" + remoteIp)
+				if err != nil {
+					return
+				}
+				defer resp.Body.Close()
+				body, err := ioutil.ReadAll(resp.Body)
+				if err != nil {
+					return
+				}
+				res := &IPRESP{}
+				json.Unmarshal([]byte(body), res)
+				if err != nil {
+					return
+				}
+				ipData = res.Data
+				if ipData.City != "" && ipData.IspID != "" {
+					ipDataMap[remoteIp] = ipData
+				}
+				city := ipData.City
+				if city == "" {
+					city = "未知"
+				}
+				ispID := ipData.IspID
+				if ispID == "" {
+					ispID = "000000"
+				}
+				debug.Printf("ip0 piping %s %s %s <-> %s", remoteAddr, city, ispID, host)
+			}
+		}
+	}()
+
 	go func() {
 		ss.PipeThenClose(conn, remote, func(Traffic int) {
 			passwdManager.addTraffic(port, Traffic)
@@ -424,6 +479,7 @@ func unifyPortPassword(config *ss.Config) (err error) {
 }
 
 var configFile string
+var logFile string
 var config *ss.Config
 
 func main() {
@@ -441,6 +497,7 @@ func main() {
 	flag.StringVar(&cmdConfig.Method, "m", "", "encryption method, default: aes-256-cfb")
 	flag.IntVar(&core, "core", 0, "maximum number of CPU cores to use, default is determinied by Go runtime")
 	flag.BoolVar((*bool)(&debug), "d", false, "print debug message")
+	flag.StringVar(&logFile, "df", "ss.log", "specify log file")
 	flag.BoolVar((*bool)(&sanitizeIps), "A", false, "anonymize client ip addresses in all output")
 	flag.BoolVar(&udp, "u", false, "UDP Relay")
 	flag.StringVar(&managerAddr, "manager-address", "", "shadowsocks manager listening address")
@@ -452,6 +509,7 @@ func main() {
 	}
 
 	ss.SetDebug(debug)
+	ss.SetDebugLogFile(debug, logFile)
 
 	var err error
 	config, err = ss.ParseConfig(configFile)
