@@ -98,7 +98,7 @@ func SetDebugLogFile(d DebugLog, fileName string) {
 	if err != nil {
 		panic(err)
 	}
-	dbgLog = log.New(file, "[DEBUG] ", log.Ltime)
+	dbgLog = log.New(file, "[DEBUG] ", log.Ldate | log.Ltime | log.Lmicroseconds | log.Llongfile)
 }
 
 // UpdateConfig: Useful for command line to override options specified in config file
