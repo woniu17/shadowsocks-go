@@ -21,7 +21,7 @@ import (
 	"syscall"
 	"time"
 
-	ss "../../shadowsocks"
+	ss "github.com/shadowsocks/shadowsocks-go/shadowsocks"
 )
 
 const (
